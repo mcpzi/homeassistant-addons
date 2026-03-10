@@ -2,17 +2,43 @@ import logging
 import random
 import requests
 from io import BytesIO
-from datetime import datetime, timedelta
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, Optional
 
-def get_image_url(args):
-    # wallpapers before 2021-08-28 are not available in 4k from https://bing.npanuhin.me/US/en/2021-08-28.jpg
-    start_date: datetime = datetime(2021, 8, 28)
-    end_date: datetime = datetime.now()
-    random_date: datetime = start_date + timedelta(days=random.randint(0, (end_date - start_date).days))
-    formatted_date: str = random_date.strftime("%Y-%m-%d")
-    url: str = f"https://bing.npanuhin.me/US/en/{formatted_date}.jpg"
-    return url
+# Cache the master list so we only download it once per script run
+_BING_ARCHIVE_CACHE = []
+
+def get_image_url(args) -> Optional[str]:
+    global _BING_ARCHIVE_CACHE
+    
+    # 1. Fetch the master list of all successfully archived images
+    if not _BING_ARCHIVE_CACHE:
+        logging.info('Fetching the master list of available Bing wallpapers...')
+        # We use the .min.json endpoint to save bandwidth
+        api_url = "https://bing.npanuhin.me/US/en.min.json"
+        
+        try:
+            response = requests.get(api_url)
+            response.raise_for_status()
+            
+            # The API returns a large list of dictionaries containing image metadata
+            data = response.json()
+            
+            if not data:
+                raise ValueError("Empty data received from Bing archive.")
+                
+            # 2. Extract all pre-verified storage URLs
+            _BING_ARCHIVE_CACHE = [item['url'] for item in data if 'url' in item]
+            logging.info(f"Successfully cached {len(_BING_ARCHIVE_CACHE)} guaranteed valid wallpaper URLs.")
+            
+        except (requests.RequestException, ValueError, KeyError) as e:
+            logging.error(f"Error fetching Bing archive list: {str(e)}")
+            return None
+
+    if not _BING_ARCHIVE_CACHE:
+        return None
+        
+    # 3. Pick a random URL from the guaranteed-to-exist list!
+    return random.choice(_BING_ARCHIVE_CACHE)
 
 def get_image(args, url) -> Tuple[Optional[BytesIO], Optional[str]]:
     try:
